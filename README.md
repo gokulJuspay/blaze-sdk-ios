@@ -231,6 +231,8 @@ pod install
 open BlazeSDK.xcworkspace
 ```
 
+For the Breeze shopping assistant (`in.breeze.shop`), see [`Example/ShopExample`](Example/ShopExample/README.md).
+
 ## License
 
 BlazeSDK is available under the MIT license. See the LICENSE file for more info.
