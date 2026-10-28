@@ -75,6 +75,11 @@ class BlazeWebView: NSObject, WKScriptMessageHandler {
         let eventDataJson = safeParseJson(jsonString: eventData)
 
         if eventName == "appReady" {
+            if var initiate = eventQueue["initiate"], var payload = initiate["payload"] as? [String: Any] {
+                payload["safeMargin"] = getSafeMargin()
+                initiate["payload"] = payload
+                eventQueue["initiate"] = initiate
+            }
             isWebViewReady = true
             drainEventQueue()
         }
@@ -142,6 +147,11 @@ class BlazeWebView: NSObject, WKScriptMessageHandler {
             self.webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             host.addSubview(self.webView)
         }
+    }
+
+    private func getSafeMargin() -> [String: CGFloat] {
+        let insets = (self.context.view.window ?? self.context.view).safeAreaInsets
+        return ["top": insets.top, "right": insets.right, "bottom": insets.bottom, "left": insets.left]
     }
 
     private func hideView() {
