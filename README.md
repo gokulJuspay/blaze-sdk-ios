@@ -124,6 +124,20 @@ blaze.initiate(
 )
 ```
 
+By default the SDK renders full screen, in the key window.
+To render it inside your own view instead, pass that `UIView` as `container`. The SDK covers the whole area of this view.
+
+```swift
+blaze.initiate(
+    context: self,
+    initiatePayload: initSDKPayload,
+    container: checkoutContainer,
+    callbackFn: { event in
+        self.blazeCallbackHandler(event: event)
+    }
+)
+```
+
 ***Combined Example:***
 
 ```swift

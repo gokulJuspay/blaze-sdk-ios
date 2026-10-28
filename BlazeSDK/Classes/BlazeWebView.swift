@@ -1,23 +1,37 @@
 import UIKit
 import WebKit
 
+private class SafeAreaWebView: WKWebView {
+
+    var onSafeAreaChange: (() -> Void)?
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        onSafeAreaChange?()
+    }
+}
+
 class BlazeWebView: NSObject, WKScriptMessageHandler {
 
-    private var webView: WKWebView!
+    private var webView: SafeAreaWebView!
     private var isWebViewReady: Bool = false
     private var consumingBackPress: Bool = false
     private var eventQueue: [String: [String: Any]] = [:]
     private var context: UIViewController
+    private weak var container: UIView?
     private var initiatePayload: [String: Any]
     private var callbackFn: ([String: Any]) -> Void
     private var isTerminated: Bool = false
+    private var lastSafeMargin: SafeMargin?
 
     init(
         context: UIViewController, initiatePayload: [String: Any],
+        container: UIView?,
         callbackFn: @escaping ([String: Any]) -> Void
     ) {
         self.context = context
         self.initiatePayload = initiatePayload
+        self.container = container
         self.callbackFn = callbackFn
         super.init()
 
@@ -27,9 +41,12 @@ class BlazeWebView: NSObject, WKScriptMessageHandler {
         let config = WKWebViewConfiguration()
         config.userContentController = contentController
 
-        self.webView = WKWebView(frame: .zero, configuration: config)
+        self.webView = SafeAreaWebView(frame: .zero, configuration: config)
         self.webView.navigationDelegate = self
         self.webView.scrollView.contentInsetAdjustmentBehavior = .never
+        self.webView.onSafeAreaChange = { [weak self] in
+            self?.sendSafeMarginIfChanged()
+        }
 
         self.sendEvent(event: "initiate", payload: initiatePayload)
         self.loadFrame()
@@ -75,8 +92,7 @@ class BlazeWebView: NSObject, WKScriptMessageHandler {
         let eventDataJson = safeParseJson(jsonString: eventData)
 
         if eventName == "appReady" {
-            isWebViewReady = true
-            drainEventQueue()
+            sendInitiate()
         }
         if eventName == "callbackEvent" {
             self.callbackFn(eventDataJson)
@@ -106,17 +122,24 @@ class BlazeWebView: NSObject, WKScriptMessageHandler {
             "source": "blaze",
         ]
 
-        if isWebViewReady {
-            let jsonData = try? JSONSerialization.data(
-                withJSONObject: eventMessage)
-            let jsonString = String(data: jsonData!, encoding: .utf8)!
-            DispatchQueue.main.async {
+        runOnMain {
+            if self.isWebViewReady {
+                let jsonData = try? JSONSerialization.data(
+                    withJSONObject: eventMessage)
+                let jsonString = String(data: jsonData!, encoding: .utf8)!
                 self.webView.evaluateJavaScript(
                     "onSDKEvent(JSON.stringify(\(jsonString)))")
+            } else {
+                self.eventQueue[event] = payload
             }
+        }
+    }
 
+    private func runOnMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread {
+            block()
         } else {
-            eventQueue[event] = payload
+            DispatchQueue.main.async(execute: block)
         }
     }
 
@@ -128,20 +151,58 @@ class BlazeWebView: NSObject, WKScriptMessageHandler {
         }
     }
 
+    private func sendInitiate() {
+        if isTerminated {
+            return
+        }
+        let safeMargin = getSafeMargin()
+        lastSafeMargin = safeMargin
+        if var initiate = eventQueue["initiate"], var payload = initiate["payload"] as? [String: Any] {
+            payload["_sdkParams"] = SdkParams(safeMargin: safeMargin).toJson()
+            initiate["payload"] = payload
+            eventQueue["initiate"] = initiate
+        }
+        isWebViewReady = true
+        drainEventQueue()
+    }
+
+    private func sendSafeMarginIfChanged() {
+        if isTerminated || lastSafeMargin == nil {
+            return
+        }
+        let safeMargin = getSafeMargin()
+        if safeMargin != lastSafeMargin {
+            lastSafeMargin = safeMargin
+            sendEvent(event: "_sdkParams", payload: SdkParams(safeMargin: safeMargin).toJson())
+        }
+    }
+
+    private func getContainer() -> UIView {
+        return self.container ?? self.context.view.window ?? self.context.view
+    }
+
     private func renderView() {
         DispatchQueue.main.async {
-            let host: UIView
-            if let window = self.context.view.window {
-                host = window
-            } else {
+            if self.container == nil && self.context.view.window == nil {
                 print("BlazeSDK: host view has no window, falling back to the view controller's view.")
-                host = self.context.view
             }
+            let host = self.getContainer()
 
             self.webView.frame = host.bounds
             self.webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             host.addSubview(self.webView)
         }
+    }
+
+    private func getSafeMargin() -> SafeMargin {
+        let view: UIView = self.webView.window != nil ? self.webView : getContainer()
+        let insets = view.safeAreaInsets
+        return SafeMargin(
+            top: Int(insets.top.rounded()),
+            right: Int(insets.right.rounded()),
+            bottom: Int(insets.bottom.rounded()),
+            left: Int(insets.left.rounded())
+        )
     }
 
     private func hideView() {

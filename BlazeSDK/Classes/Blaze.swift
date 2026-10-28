@@ -12,6 +12,7 @@ public class Blaze: NSObject {
 
     public func initiate(
         context: UIViewController, initiatePayload: [String: Any],
+        container: UIView? = nil,
         callbackFn: @escaping CallbackFn
     ) {
 
@@ -25,7 +26,7 @@ public class Blaze: NSObject {
         DispatchQueue.main.async {
             self.webView = BlazeWebView(
                 context: self.context, initiatePayload: initiatePayload,
-                callbackFn: callbackFn)
+                container: container, callbackFn: callbackFn)
         }
         self.isInitialized = true
     }
